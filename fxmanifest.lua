@@ -2,9 +2,9 @@ game 'rdr3'
 fx_version 'adamant'
 rdr3_warning 'I acknowledge that this is a prerelease build of RedM, and I am aware my resources *will* become incompatible once RedM ships.'
 
-version '1.2'
+version '1.0'
 author 'phil mcracken'
-description 'Mobile Data Terminal (MDT) system using ox_lib for UI'
+description ' (MDT) system'
 
 dependency 'ox_lib'
 
