@@ -15,13 +15,59 @@ local Config = {
         ['8'] = "Telegram saved.",
         ['9'] = "Telegram deleted.",
         ['10'] = "Invalid mugshot URL provided.",
-        ['11'] = "Fine has been issued successfully.",  
-        ['12'] = "Fine has been marked as paid.",       
-        ['13'] = "Fine has been deleted.",              
-        ['14'] = "Fine not found.",                     
-        ['15'] = "Player is not online to receive fine notification." 
+        ['11'] = "Fine has been issued successfully.",
+        ['12'] = "Fine has been marked as paid.",
+        ['13'] = "Fine has been deleted.",
+        ['14'] = "Fine not found.",
+        ['15'] = "Player is not online to receive fine notification.",
+        ['16'] = "Notice posted to public board."
+    },
+    -- Noticeboard Config
+    DatabaseName = "notices",
+    MaxNoticesPerPlayer = 30,
+    NoticeTitleMaxLength = 50,
+    NoticeDescMaxLength = 500,
+    NoticeUrlMaxLength = 255,
+    AllowedImageDomains = {
+        "cdn.discordapp.com",
+        "media.discordapp.net",
+        "i.imgur.com",
+        "i.redd.it"
     }
 }
+
+local function wasSuccessful(result)
+    return result and ((type(result) == "table" and result.affectedRows and result.affectedRows > 0) or
+                      (type(result) == "number" and result > 0))
+end
+
+local function sanitizeUrl(url)
+    if not url or url == "" then return nil end
+    
+    url = url:gsub("^%s+", ""):gsub("%s+$", "")
+    
+    if #url > Config.NoticeUrlMaxLength then
+        return nil
+    end
+    
+    if not url:match("^https?://[%w-_%.%?%.:/%+=&]+$") then
+        return nil
+    end
+    
+    return url
+end
+
+local function isAllowedImageUrl(url)
+    if not url then return false end
+    
+    for _, domain in ipairs(Config.AllowedImageDomains) do
+        if url:find(domain, 1, true) then
+            return true
+        end
+    end
+    
+    return false
+end
 
 
 local activeMDTUsers = {}
@@ -47,6 +93,40 @@ local function IsValidImageURL(url)
         end
     end
     return false
+end
+
+local function broadcastMDTUpdate()
+    exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_reports` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(reports)
+        for r = 1, #reports do
+            if reports[r].charges then
+                reports[r].charges = json.decode(reports[r].charges)
+            end
+        end
+        
+        exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_warrants` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(warrants)
+            for w = 1, #warrants do
+                if warrants[w].charges then
+                    warrants[w].charges = json.decode(warrants[w].charges)
+                end
+            end
+            
+            exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_telegrams` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(notes)
+                for n = 1, #notes do
+                    if notes[n].charges then
+                        notes[n].charges = json.decode(notes[n].charges)
+                    end
+                end
+                
+                exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_fines` ORDER BY `id` DESC LIMIT 10) sub ORDER BY `id` DESC", {}, function(fines)
+                    exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `notices` ORDER BY `id` DESC LIMIT 10) sub ORDER BY `id` DESC", {}, function(notices)
+                        for src, _ in pairs(activeMDTUsers) do
+                            TriggerClientEvent('phils-mdt:updateMDTData', src, reports, warrants, notes, fines, notices)
+                        end
+                    end)
+                end)
+            end)
+        end)
+    end)
 end
 
 RegisterServerEvent('phils-mdt:getMyFines')
@@ -208,22 +288,7 @@ AddEventHandler('phils-mdt:payFine', function(fineData, amount, paymentMethod, p
         end)
     end
 end)
-RegisterCommand('debugfines', function(source, args)
-    local Player = RSGCore.Functions.GetPlayer(source)
-    if not Player then return end
-    
-    print("Player citizenid: " .. Player.PlayerData.citizenid)
-    
-    exports.oxmysql:fetch('SELECT * FROM `mdt_fines` WHERE `citizenid` = ?', {
-        Player.PlayerData.citizenid
-    }, function(result)
-        print("Total fines found: " .. #result)
-        for i, fine in ipairs(result) do
-            print("Fine " .. i .. ": ID=" .. fine.id .. ", Amount=" .. fine.amount .. ", Paid=" .. tostring(fine.paid) .. ", CitizenID=" .. (fine.citizenid or "NULL"))
-        end
-    end)
-end, false)
--- Optional: Admin command to forgive fines
+
 RegisterCommand('forgivefines', function(source, args)
     local src = source
     local Player = RSGCore.Functions.GetPlayer(src)
@@ -322,38 +387,7 @@ AddEventHandler('playerDropped', function()
 end)
 
 
-local function broadcastMDTUpdate()
-    exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_reports` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(reports)
-        for r = 1, #reports do
-            if reports[r].charges then
-                reports[r].charges = json.decode(reports[r].charges)
-            end
-        end
-        
-        exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_warrants` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(warrants)
-            for w = 1, #warrants do
-                if warrants[w].charges then
-                    warrants[w].charges = json.decode(warrants[w].charges)
-                end
-            end
-            
-            exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_telegrams` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(notes)
-                for n = 1, #notes do
-                    if notes[n].charges then
-                        notes[n].charges = json.decode(notes[n].charges)
-                    end
-                end
-                
-               
-                exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_fines` ORDER BY `id` DESC LIMIT 10) sub ORDER BY `id` DESC", {}, function(fines)
-                    for src, _ in pairs(activeMDTUsers) do
-                        TriggerClientEvent('phils-mdt:updateMDTData', src, reports, warrants, notes, fines)
-                    end
-                end)
-            end)
-        end)
-    end)
-end
+
 
 RegisterCommand(Config.Command, function(source, args)
     local _source = source
@@ -808,12 +842,43 @@ AddEventHandler("phils-mdt:submitNewReport", function(data)
         data.name, 
         data.date
     }, function(id)
+        -- Create notice for report
+        if data.name then
+            local noticeTitle = "Incident Report: " .. data.title
+            local noticeDesc = "Incident involving " .. data.name .. ". Charges: " .. (data.charges and table.concat(data.charges, ", ") or "None") .. ". Contact law enforcement for details."
+            local cleanUrl = sanitizeUrl(data.notice_url)
+            
+            if cleanUrl and not isAllowedImageUrl(cleanUrl) then
+                TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['10'])
+            else
+                exports.oxmysql:execute('SELECT COUNT(*) as count FROM ' .. Config.DatabaseName .. ' WHERE citizenid = ?', {
+                    Player.PlayerData.citizenid
+                }, function(result)
+                    local noticeCount = (result and result[1] and result[1].count) or 0
+                    if noticeCount >= Config.MaxNoticesPerPlayer then
+                        TriggerClientEvent("phils-mdt:sendNotification", usource, "You have reached the maximum number of notices (" .. Config.MaxNoticesPerPlayer .. ").")
+                    else
+                        exports.oxmysql:insert('INSERT INTO ' .. Config.DatabaseName .. ' (citizenid, title, description, url, created_at) VALUES (?, ?, ?, ?, ?)', {
+                            Player.PlayerData.citizenid,
+                            noticeTitle:sub(1, Config.NoticeTitleMaxLength),
+                            noticeDesc:sub(1, Config.NoticeDescMaxLength),
+                            cleanUrl,
+                            os.date('%Y-%m-%d %H:%M:%S')
+                        }, function(result2)
+                            if wasSuccessful(result2) then
+                                TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['16'])
+                            end
+                        end)
+                    end
+                end)
+            end
+        end
+        
         TriggerEvent("phils-mdt:getReportDetailsById", id, usource)
         TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['4'])
         broadcastMDTUpdate()
     end)
     
-
     if data.char_id and data.charges then
         for _, charge in ipairs(data.charges) do
             exports.oxmysql:fetch('SELECT * FROM `user_convictions` WHERE `char_id` = ? AND `offense` = ?', {data.char_id, charge}, function(result)
@@ -887,7 +952,6 @@ AddEventHandler("phils-mdt:getWarrants", function()
     end)
 end)
 
--- Submit new warrant
 RegisterServerEvent("phils-mdt:submitNewWarrant")
 AddEventHandler("phils-mdt:submitNewWarrant", function(data)
     local usource = source
@@ -912,6 +976,38 @@ AddEventHandler("phils-mdt:submitNewWarrant", function(data)
         data.notes, 
         data.author
     }, function()
+        -- Create notice for warrant
+        if data.name then
+            local noticeTitle = "Wanted: " .. data.name
+            local noticeDesc = "Warrant issued for " .. data.name .. ". Reason: " .. (data.report_title or "N/A") .. ". Contact law enforcement."
+            local cleanUrl = sanitizeUrl(data.notice_url)
+            
+            if cleanUrl and not isAllowedImageUrl(cleanUrl) then
+                TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['10'])
+            else
+                exports.oxmysql:execute('SELECT COUNT(*) as count FROM ' .. Config.DatabaseName .. ' WHERE citizenid = ?', {
+                    Player.PlayerData.citizenid
+                }, function(result)
+                    local noticeCount = (result and result[1] and result[1].count) or 0
+                    if noticeCount >= Config.MaxNoticesPerPlayer then
+                        TriggerClientEvent("phils-mdt:sendNotification", usource, "You have reached the maximum number of notices (" .. Config.MaxNoticesPerPlayer .. ").")
+                    else
+                        exports.oxmysql:insert('INSERT INTO ' .. Config.DatabaseName .. ' (citizenid, title, description, url, created_at) VALUES (?, ?, ?, ?, ?)', {
+                            Player.PlayerData.citizenid,
+                            noticeTitle:sub(1, Config.NoticeTitleMaxLength),
+                            noticeDesc:sub(1, Config.NoticeDescMaxLength),
+                            cleanUrl,
+                            os.date('%Y-%m-%d %H:%M:%S')
+                        }, function(result2)
+                            if wasSuccessful(result2) then
+                                TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['16'])
+                            end
+                        end)
+                    end
+                end)
+            end
+        end
+        
         TriggerClientEvent("phils-mdt:completedWarrantAction", usource)
         TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['5'])
         broadcastMDTUpdate()
