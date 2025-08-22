@@ -937,12 +937,46 @@ function editPersonNotes()
     
     showPersonDetails(mdtData.currentOffender)
 end
-
+function removeConviction(convictionOptions)
+    if not mdtData.currentOffender then return end
+    
+    local input = lib:inputDialog('Remove Convictions', {
+        {
+            type = 'multi-select',
+            label = 'Convictions',
+            description = 'Select convictions to remove',
+            options = convictionOptions,
+            required = true
+        }
+    })
+    
+    if input and input[1] then
+        local confirm = lib:alertDialog({
+            header = 'Remove Convictions',
+            content = 'Are you sure you want to remove the selected convictions?\n\nThis action cannot be undone.',
+            centered = true,
+            cancel = true,
+            labels = {
+                confirm = 'Remove',
+                cancel = 'Cancel'
+            }
+        })
+        
+        if confirm == 'confirm' then
+            TriggerServerEvent("phils-mdt:removeConvictions", mdtData.currentOffender.id, input[1])
+        else
+            showConvictions()
+        end
+    else
+        showConvictions()
+    end
+end
 
 function showConvictions()
     if not mdtData.currentOffender then return end
     
     local options = {}
+    local convictionOptions = {}
     
     if mdtData.currentOffender.convictions then
         for offense, count in pairs(mdtData.currentOffender.convictions) do
@@ -951,6 +985,10 @@ function showConvictions()
                 description = 'Convictions: ' .. count,
                 icon = 'fa-solid fa-balance-scale',
                 disabled = true
+            })
+            table.insert(convictionOptions, {
+                label = offense .. ' (' .. count .. ')',
+                value = offense
             })
         end
     end
@@ -962,6 +1000,16 @@ function showConvictions()
             icon = 'fa-solid fa-check-circle',
             iconColor = 'green',
             disabled = true
+        })
+    else
+        table.insert(options, {
+            title = 'Remove Convictions',
+            description = 'Select convictions to remove',
+            icon = 'fa-solid fa-trash',
+            iconColor = 'red',
+            onSelect = function()
+                removeConviction(convictionOptions)
+            end
         })
     end
     
@@ -2020,9 +2068,14 @@ AddEventHandler("phils-mdt:closeModal", function()
     openMainMDT()
 end)
 
+RegisterNetEvent("phils-mdt:convictionsRemoved")
+AddEventHandler("phils-mdt:convictionsRemoved", function()
+    if mdtData.currentOffender then
+        TriggerServerEvent("phils-mdt:getOffenderDetails", mdtData.currentOffender)
+    end
+end)
+
 RegisterNetEvent("phils-mdt:completedWarrantAction")
 AddEventHandler("phils-mdt:completedWarrantAction", function()
     TriggerServerEvent("phils-mdt:getWarrants")
 end)
-
-
