@@ -9,10 +9,13 @@ local mdtData = {
     recentReports = {},
     recentWarrants = {},
     recentNotes = {},
+    recentFines = {},  
     searchResults = {},
     currentOffender = nil,
     currentReport = nil,
-    currentNote = nil
+    currentNote = nil,
+    currentFine = nil,  
+    pendingFine = nil   
 }
 
 
@@ -41,7 +44,218 @@ local function IsValidImageURL(url)
     return false
 end
 
+RegisterCommand('payfines', function()
+    TriggerServerEvent('phils-mdt:getMyFines')
+end)
 
+RegisterCommand('checkfines', function()
+    TriggerServerEvent('phils-mdt:getMyFines')
+end)
+
+
+local function showMyFines(fines)
+    if not fines or #fines == 0 then
+        lib:notify({
+            title = 'Fines',
+            description = 'You have no outstanding fines.',
+            type = 'success'
+        })
+        return
+    end
+    
+    local options = {}
+    local totalOwed = 0
+    
+    
+    for i, fine in ipairs(fines) do
+        if fine.paid == false then
+            totalOwed = totalOwed + fine.amount
+            table.insert(options, {
+                title = 'Fine #' .. fine.id .. ': $' .. fine.amount,
+                description = 'Offense: ' .. fine.offense .. ' | Issued by: ' .. fine.officer_name .. ' | Date: ' .. fine.date,
+                icon = 'fa-solid fa-money-bill',
+                iconColor = 'red',
+                onSelect = function()
+                    payIndividualFine(fine)
+                end
+            })
+        end
+    end
+    
+    if #options == 0 then
+        lib:notify({
+            title = 'Fines',
+            description = 'You have no outstanding fines.',
+            type = 'success'
+        })
+        return
+    end
+    
+    
+    if #options > 1 then
+        table.insert(options, 1, {
+            title = 'Pay All Fines ($' .. totalOwed .. ')',
+            description = 'Pay all outstanding fines at once',
+            icon = 'fa-solid fa-credit-card',
+            iconColor = 'green',
+            onSelect = function()
+                payAllFines(fines, totalOwed)
+            end
+        })
+        
+        table.insert(options, 2, {
+            title = '------- Individual Fines -------',
+            description = 'Select individual fines to pay below',
+            icon = 'fa-solid fa-list',
+            disabled = true
+        })
+    end
+    
+    lib:registerContext({
+        id = 'my_fines',
+        title = 'Outstanding Fines ($' .. totalOwed .. ' total)',
+        options = options
+    })
+    
+    lib:showContext('my_fines')
+end
+
+
+function payIndividualFine(fine)
+    local confirm = lib:alertDialog({
+        header = 'Pay Fine',
+        content = 'Pay fine for: ' .. fine.offense .. 
+                  '\nAmount: $' .. fine.amount ..
+                  '\nIssued by: ' .. fine.officer_name ..
+                  (fine.notes and fine.notes ~= '' and ('\nNotes: ' .. fine.notes) or ''),
+        centered = true,
+        cancel = true,
+        labels = {
+            confirm = 'Pay $' .. fine.amount,
+            cancel = 'Cancel'
+        }
+    })
+    
+    if confirm == 'confirm' then
+       
+        selectPaymentMethod(fine.id, fine.amount, 'single')
+    end
+end
+
+
+function payAllFines(fines, totalAmount)
+    local unpaidFines = {}
+    for _, fine in ipairs(fines) do
+        if fine.paid == false then
+            table.insert(unpaidFines, fine.id)
+        end
+    end
+    
+    local confirm = lib:alertDialog({
+        header = 'Pay All Fines',
+        content = 'Pay all outstanding fines?\n\nTotal Amount: $' .. totalAmount .. '\nNumber of fines: ' .. #unpaidFines,
+        centered = true,
+        cancel = true,
+        labels = {
+            confirm = 'Pay $' .. totalAmount,
+            cancel = 'Cancel'
+        }
+    })
+    
+    if confirm == 'confirm' then
+        selectPaymentMethod(unpaidFines, totalAmount, 'all')
+    end
+end
+
+
+function selectPaymentMethod(fineData, amount, paymentType)
+    local options = {
+        {
+            title = 'Pay with Cash',
+            description = 'Pay using cash on hand',
+            icon = 'fa-solid fa-money-bill',
+            onSelect = function()
+                TriggerServerEvent('phils-mdt:payFine', fineData, amount, 'cash', paymentType)
+            end
+        },
+        {
+            title = 'Pay with Bank',
+            description = 'Pay using bank account',
+            icon = 'fa-solid fa-building-columns',
+            onSelect = function()
+                TriggerServerEvent('phils-mdt:payFine', fineData, amount, 'bank', paymentType)
+            end
+        },
+        {
+            title = 'Cancel',
+            description = 'Go back to fines list',
+            icon = 'fa-solid fa-times',
+            onSelect = function()
+                TriggerServerEvent('phils-mdt:getMyFines')
+            end
+        }
+    }
+    
+    lib:registerContext({
+        id = 'payment_method',
+        title = 'Select Payment Method ($' .. amount .. ')',
+        options = options
+    })
+    
+    lib:showContext('payment_method')
+end
+
+
+RegisterNetEvent('phils-mdt:returnMyFines')
+AddEventHandler('phils-mdt:returnMyFines', function(fines)
+    showMyFines(fines)
+end)
+
+RegisterNetEvent('phils-mdt:finePaymentResult')
+AddEventHandler('phils-mdt:finePaymentResult', function(success, message, newBalance)
+    if success then
+        lib:notify({
+            title = 'Payment Successful',
+            description = message .. (newBalance and ('\nRemaining Balance: $' .. newBalance) or ''),
+            type = 'success',
+            duration = 5000
+        })
+    else
+        lib:notify({
+            title = 'Payment Failed',
+            description = message,
+            type = 'error',
+            duration = 5000
+        })
+    end
+    
+    
+    Wait(1000)
+    TriggerServerEvent('phils-mdt:getMyFines')
+end)
+
+
+RegisterCommand('finestatus', function()
+    TriggerServerEvent('phils-mdt:getMyFinesStatus')
+end)
+
+RegisterNetEvent('phils-mdt:fineStatus')
+AddEventHandler('phils-mdt:fineStatus', function(totalFines, totalAmount)
+    if totalFines == 0 then
+        lib:notify({
+            title = 'Fine Status',
+            description = 'You have no outstanding fines.',
+            type = 'success'
+        })
+    else
+        lib:notify({
+            title = 'Fine Status',
+            description = 'You have ' .. totalFines .. ' outstanding fine(s) totaling $' .. totalAmount .. '\nUse /payfines to pay them.',
+            type = 'inform',
+            duration = 7000
+        })
+    end
+end)
 
 
 RegisterNUICallback('closeMugshot', function(data, cb)
@@ -51,7 +265,6 @@ end)
 
 
 local function openMainMDT()
-    
     TriggerServerEvent("phils-mdt:registerMDTUser")
     
     local options = {
@@ -95,6 +308,23 @@ local function openMainMDT()
                 openNewWarrantForm()
             end
         },
+        
+        {
+            title = 'Issue Fine',
+            description = 'Issue a fine to a citizen',
+            icon = 'fa-solid fa-dollar-sign',
+            onSelect = function()
+                openNewFineForm()
+            end
+        },
+        {
+            title = 'View Recent Fines',
+            description = 'View recently issued fines',
+            icon = 'fa-solid fa-money-bill',
+            onSelect = function()
+                showRecentFines()
+            end
+        },
         {
             title = 'Write Telegram',
             description = 'Write a new telegram/note',
@@ -126,10 +356,8 @@ local function openMainMDT()
         title = 'Mobile Data Terminal',
         options = options,
         onExit = function()
-            
             TriggerServerEvent("phils-mdt:unregisterMDTUser")
             currentContextId = nil
-           
             SendNUIMessage({
                 action = 'closeMugshot'
             })
@@ -140,8 +368,342 @@ local function openMainMDT()
     currentContextId = 'rsg_mdt_main'
     lib:showContext('rsg_mdt_main')
 end
+function openNewFineForm()
+    local fineOptions = {}
+    for _, offense in ipairs(mdtData.offenses) do
+        if offense.amount and offense.amount > 0 then  -- Only show offenses with fine amounts
+            table.insert(fineOptions, {
+                label = offense.label .. ' ($' .. offense.amount .. ')',
+                value = offense.label
+            })
+        end
+    end
+    
+    if #fineOptions == 0 then
+        lib:notify({
+            title = 'MDT',
+            description = 'No fineable offenses available. Contact administration.',
+            type = 'error'
+        })
+        openMainMDT()
+        return
+    end
+    
+    local input = lib:inputDialog('Issue Fine', {
+        {
+            type = 'input',
+            label = 'Citizen Name',
+            description = 'Enter citizen full name',
+            required = true,
+            max = 100
+        },
+        {
+            type = 'select',
+            label = 'Offense',
+            description = 'Select the offense',
+            options = fineOptions,
+            required = true
+        },
+        {
+            type = 'textarea',
+            label = 'Notes',
+            description = 'Additional notes about the fine (optional)',
+            max = 500
+        }
+    })
+    
+    if input then
+        
+        local selectedOffense = nil
+        for _, offense in ipairs(mdtData.offenses) do
+            if offense.label == input[2] then
+                selectedOffense = offense
+                break
+            end
+        end
+        
+        if selectedOffense then
+            TriggerServerEvent("phils-mdt:performOffenderSearch", input[1])
+            mdtData.pendingFine = {
+                citizenName = input[1],
+                offense = selectedOffense.label,
+                amount = selectedOffense.amount,
+                notes = input[3] or '',
+                offenseData = selectedOffense
+            }
+        else
+            lib:notify({
+                title = 'MDT',
+                description = 'Invalid offense selected.',
+                type = 'error'
+            })
+            openMainMDT()
+        end
+    else
+        openMainMDT()
+    end
+end
 
 
+function showRecentFines()
+    if not mdtData.recentFines or #mdtData.recentFines == 0 then
+        lib:notify({
+            title = 'MDT',
+            description = 'No recent fines found',
+            type = 'info'
+        })
+        openMainMDT()
+        return
+    end
+    
+    local options = {}
+    
+    for i, fine in ipairs(mdtData.recentFines) do
+        local statusText = fine.paid and "PAID" or "UNPAID"
+        local statusColor = fine.paid == 1 and "green" or "red"
+        
+        table.insert(options, {
+            title = 'Fine #' .. fine.id .. ': ' .. fine.citizen_name,
+            description = 'Offense: ' .. fine.offense .. ' | Amount: $' .. fine.amount .. ' | Status: ' .. statusText,
+            icon = 'fa-solid fa-money-bill',
+            iconColor = statusColor,
+            onSelect = function()
+                showFineDetails(fine)
+            end
+        })
+    end
+    
+    table.insert(options, {
+        title = 'Back to Main Menu',
+        icon = 'fa-solid fa-arrow-left',
+        onSelect = function()
+            openMainMDT()
+        end
+    })
+    
+    lib:registerContext({
+        id = 'recent_fines',
+        title = 'Recent Fines',
+        options = options
+    })
+    
+    currentContextId = 'recent_fines'
+    lib:showContext('recent_fines')
+end
+
+function showFineDetails(fine)
+    mdtData.currentFine = fine
+    
+    local statusText = fine.paid and "PAID" or "UNPAID"
+    local statusColor = fine.paid == 1 and "green" or "red"
+    
+    local options = {
+        {
+            title = 'Fine #' .. fine.id,
+            description = 'Citizen: ' .. fine.citizen_name,
+            icon = 'fa-solid fa-money-bill',
+            disabled = true
+        },
+        {
+            title = 'Offense: ' .. fine.offense,
+            description = 'Violation committed',
+            icon = 'fa-solid fa-exclamation-triangle',
+            disabled = true
+        },
+        {
+            title = 'Amount: $' .. fine.amount,
+            description = 'Fine amount',
+            icon = 'fa-solid fa-dollar-sign',
+            disabled = true
+        },
+        {
+            title = 'Status: ' .. statusText,
+            description = 'Payment status',
+            icon = 'fa-solid fa-info-circle',
+            iconColor = statusColor,
+            disabled = true
+        },
+        {
+            title = 'Issued by: ' .. fine.officer_name,
+            description = 'Officer who issued the fine',
+            icon = 'fa-solid fa-user-tie',
+            disabled = true
+        },
+        {
+            title = 'Date: ' .. fine.date,
+            description = 'Issue date',
+            icon = 'fa-solid fa-calendar',
+            disabled = true
+        }
+    }
+    
+    if fine.notes and fine.notes ~= '' then
+        table.insert(options, {
+            title = 'View Notes',
+            description = 'Read fine notes',
+            icon = 'fa-solid fa-note-sticky',
+            onSelect = function()
+                lib:alertDialog({
+                    header = 'Fine Notes',
+                    content = fine.notes,
+                    centered = true,
+                    cancel = true,
+                    labels = {
+                        cancel = 'Close'
+                    }
+                })
+            end
+        })
+    end
+    
+    if fine.paid == false then
+        table.insert(options, {
+            title = 'Mark as Paid',
+            description = 'Mark this fine as paid',
+            icon = 'fa-solid fa-check',
+            iconColor = 'green',
+            onSelect = function()
+                markFineAsPaid()
+            end
+        })
+    end
+    
+    table.insert(options, {
+        title = 'Delete Fine',
+        description = 'Remove this fine permanently',
+        icon = 'fa-solid fa-trash',
+        iconColor = 'red',
+        onSelect = function()
+            deleteFine()
+        end
+    })
+    
+    table.insert(options, {
+        title = 'Back to Fines',
+        icon = 'fa-solid fa-arrow-left',
+        onSelect = function()
+            showRecentFines()
+        end
+    })
+    
+    lib:registerContext({
+        id = 'fine_details',
+        title = 'Fine Details',
+        options = options
+    })
+    
+    currentContextId = 'fine_details'
+    lib:showContext('fine_details')
+end
+
+function markFineAsPaid()
+    if not mdtData.currentFine then return end
+    
+    local confirm = lib:alertDialog({
+        header = 'Mark Fine as Paid',
+        content = 'Are you sure you want to mark Fine #' .. mdtData.currentFine.id .. ' as paid?\n\nAmount: $' .. mdtData.currentFine.amount,
+        centered = true,
+        cancel = true,
+        labels = {
+            confirm = 'Mark Paid',
+            cancel = 'Cancel'
+        }
+    })
+    
+    if confirm == 'confirm' then
+        TriggerServerEvent("phils-mdt:markFineAsPaid", mdtData.currentFine.id)
+    else
+        showFineDetails(mdtData.currentFine)
+    end
+end
+
+function deleteFine()
+    if not mdtData.currentFine then return end
+    
+    local confirm = lib:alertDialog({
+        header = 'Delete Fine',
+        content = 'Are you sure you want to delete Fine #' .. mdtData.currentFine.id .. '?\n\nThis action cannot be undone.',
+        centered = true,
+        cancel = true,
+        labels = {
+            confirm = 'Delete',
+            cancel = 'Cancel'
+        }
+    })
+    
+    if confirm == 'confirm' then
+        TriggerServerEvent("phils-mdt:deleteFine", mdtData.currentFine.id)
+        openMainMDT()
+    else
+        showFineDetails(mdtData.currentFine)
+    end
+end
+
+
+function selectPersonForFine(results)
+    local options = {}
+    
+    for i, person in ipairs(results) do
+        table.insert(options, {
+            title = person.firstname .. ' ' .. person.lastname,
+            description = 'DOB: ' .. (person.birthdate or 'Unknown') .. ' | ID: ' .. person.citizenid,
+            icon = 'fa-solid fa-user',
+            onSelect = function()
+                confirmFineIssuance(person)
+            end
+        })
+    end
+    
+    table.insert(options, {
+        title = 'Cancel',
+        icon = 'fa-solid fa-times',
+        onSelect = function()
+            mdtData.pendingFine = nil
+            openMainMDT()
+        end
+    })
+    
+    lib:registerContext({
+        id = 'select_person_fine',
+        title = 'Select Person for Fine',
+        options = options
+    })
+    
+    currentContextId = 'select_person_fine'
+    lib:showContext('select_person_fine')
+end
+
+
+function confirmFineIssuance(person)
+    if not mdtData.pendingFine then return end
+    
+    local confirm = lib:alertDialog({
+        header = 'Confirm Fine Issuance',
+        content = 'Issue fine to: ' .. person.firstname .. ' ' .. person.lastname .. 
+                  '\nOffense: ' .. mdtData.pendingFine.offense .. 
+                  '\nAmount: $' .. mdtData.pendingFine.amount .. 
+                  (mdtData.pendingFine.notes ~= '' and ('\nNotes: ' .. mdtData.pendingFine.notes) or ''),
+        centered = true,
+        cancel = true,
+        labels = {
+            confirm = 'Issue Fine',
+            cancel = 'Cancel'
+        }
+    })
+    
+    if confirm == 'confirm' then
+        local fineData = mdtData.pendingFine
+        fineData.char_id = person.id
+        fineData.citizenid = person.citizenid
+        fineData.citizen_name = person.firstname .. ' ' .. person.lastname
+        
+        TriggerServerEvent("phils-mdt:submitNewFine", fineData)
+        mdtData.pendingFine = nil
+        openMainMDT()
+    else
+        selectPersonForFine({person})
+    end
+end
 function openPersonSearch()
     local input = lib:inputDialog('Search Person', {
         {
@@ -172,6 +734,13 @@ local function showPersonSearchResults(results)
         openMainMDT()
         return
     end
+    
+    
+    if mdtData.pendingFine then
+        selectPersonForFine(results)
+        return
+    end
+    
     
     local options = {}
     
@@ -217,7 +786,7 @@ local function showPersonSearchResults(results)
     lib:showContext('person_search_results')
 end
 
--- Show person details
+
 local function showPersonDetails(offender)
     mdtData.currentOffender = offender
     
@@ -1223,10 +1792,11 @@ end
 
 
 RegisterNetEvent("phils-mdt:toggleVisibilty")
-AddEventHandler("phils-mdt:toggleVisibilty", function(reports, warrants, officer, job, grade, notes)
+AddEventHandler("phils-mdt:toggleVisibilty", function(reports, warrants, officer, job, grade, notes, fines)
     mdtData.recentReports = reports or {}
     mdtData.recentWarrants = warrants or {}
     mdtData.recentNotes = notes or {}
+    mdtData.recentFines = fines or {}  -- NEW: Add fines data
     mdtData.officerName = officer
     
     TriggerServerEvent("phils-mdt:getOffensesAndOfficer")
@@ -1234,20 +1804,22 @@ AddEventHandler("phils-mdt:toggleVisibilty", function(reports, warrants, officer
 end)
 
 RegisterNetEvent("phils-mdt:updateMDTData")
-AddEventHandler("phils-mdt:updateMDTData", function(reports, warrants, notes)
+AddEventHandler("phils-mdt:updateMDTData", function(reports, warrants, notes, fines)
     mdtData.recentReports = reports or {}
     mdtData.recentWarrants = warrants or {}
     mdtData.recentNotes = notes or {}
+    mdtData.recentFines = fines or {}  -- NEW: Add fines data
     
-   
+    -- Refresh current context if viewing fines
     if currentContextId == 'recent_reports' then
         showRecentReports()
     elseif currentContextId == 'warrants_list' then
         showWarrants(mdtData.recentWarrants)
     elseif currentContextId == 'recent_notes' then
         showRecentNotes()
+    elseif currentContextId == 'recent_fines' then  -- NEW: Handle fines refresh
+        showRecentFines()
     elseif currentContextId == 'report_details' and mdtData.currentReport then
-       
         local reportExists = false
         for _, report in ipairs(mdtData.recentReports) do
             if report.id == mdtData.currentReport.id then
@@ -1267,7 +1839,6 @@ AddEventHandler("phils-mdt:updateMDTData", function(reports, warrants, notes)
             openMainMDT()
         end
     elseif currentContextId == 'note_details' and mdtData.currentNote then
-       
         local noteExists = false
         for _, note in ipairs(mdtData.recentNotes) do
             if note.id == mdtData.currentNote.id then
@@ -1282,6 +1853,25 @@ AddEventHandler("phils-mdt:updateMDTData", function(reports, warrants, notes)
             lib:notify({
                 title = 'MDT',
                 description = 'Current telegram no longer exists.',
+                type = 'info'
+            })
+            openMainMDT()
+        end
+    elseif currentContextId == 'fine_details' and mdtData.currentFine then  -- NEW: Handle fine details refresh
+        local fineExists = false
+        for _, fine in ipairs(mdtData.recentFines) do
+            if fine.id == mdtData.currentFine.id then
+                mdtData.currentFine = fine
+                fineExists = true
+                break
+            end
+        end
+        if fineExists then
+            showFineDetails(mdtData.currentFine)
+        else
+            lib:notify({
+                title = 'MDT',
+                description = 'Current fine no longer exists.',
                 type = 'info'
             })
             openMainMDT()
@@ -1353,6 +1943,17 @@ AddEventHandler("phils-mdt:returnReportDetails", function(data)
     showReportDetails(data)
 end)
 
+RegisterNetEvent("phils-mdt:returnRecentFines")
+AddEventHandler("phils-mdt:returnRecentFines", function(fines)
+    mdtData.recentFines = fines or {}
+    showRecentFines()
+end)
+
+RegisterNetEvent("phils-mdt:fineActionCompleted")
+AddEventHandler("phils-mdt:fineActionCompleted", function()
+    TriggerServerEvent("phils-mdt:getRecentFines")
+end)
+
 RegisterNetEvent("phils-mdt:returnNoteDetails")
 AddEventHandler("phils-mdt:returnNoteDetails", function(data)
     if not data or not data.id then
@@ -1390,3 +1991,4 @@ RegisterNetEvent("phils-mdt:completedWarrantAction")
 AddEventHandler("phils-mdt:completedWarrantAction", function()
     TriggerServerEvent("phils-mdt:getWarrants")
 end)
+
