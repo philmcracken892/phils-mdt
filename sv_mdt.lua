@@ -37,6 +37,34 @@ local Config = {
     }
 }
 
+-- Server-side code (add to your server.lua or similar file)
+RSGCore.Functions.CreateUseableItem('lawbook', function(source)
+    local Player = RSGCore.Functions.GetPlayer(source)
+    if not Player then return end
+    
+    -- Check if player has the required job/permission
+    local allowedJobs = {'vallaw', 'blklaw', 'strlaw', 'stdenlaw','rholaw',} 
+    local hasPermission = false
+    
+    for _, job in ipairs(allowedJobs) do
+        if Player.PlayerData.job.name == job then
+            hasPermission = true
+            break
+        end
+    end
+    
+    if hasPermission then
+        -- Trigger the client-side MDT opening
+        TriggerClientEvent('phils-mdt:openFromItem', source)
+    else
+        TriggerClientEvent('ox_lib:notify', source, {
+            title = 'Access Denied',
+            description = 'You are not authorized to use this item',
+            type = 'error'
+        })
+    end
+end)
+
 local function wasSuccessful(result)
     return result and ((type(result) == "table" and result.affectedRows and result.affectedRows > 0) or
                       (type(result) == "number" and result > 0))
