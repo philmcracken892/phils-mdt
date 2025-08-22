@@ -490,8 +490,9 @@ RegisterServerEvent("phils-mdt:deleteFine")
 AddEventHandler("phils-mdt:deleteFine", function(fineId)
     local usource = source
     
-    exports.oxmysql:execute('DELETE FROM `mdt_fines` WHERE `id` = ?', {fineId}, function(rowsChanged)
-        if rowsChanged > 0 then
+    exports.oxmysql:execute('DELETE FROM `mdt_fines` WHERE `id` = ?', {fineId}, function(result)
+        local affectedRows = result.affectedRows or 0
+        if affectedRows > 0 then
             TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['13'])
             broadcastMDTUpdate()
         else
