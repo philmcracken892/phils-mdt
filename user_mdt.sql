@@ -65,6 +65,44 @@ CREATE TABLE `mdt_telegrams` (
 	PRIMARY KEY (`id`)
 );
 
+CREATE TABLE `mdt_fine_payments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `fine_id` int(11) NOT NULL,
+  `citizenid` varchar(50) NOT NULL,
+  `amount` int(11) NOT NULL,
+  `payment_method` enum('cash','bank') NOT NULL,
+  `payment_date` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `fine_id` (`fine_id`),
+  KEY `citizenid` (`citizenid`),
+  KEY `payment_date` (`payment_date`),
+  FOREIGN KEY (`fine_id`) REFERENCES `mdt_fines`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+ALTER TABLE `mdt_fines` 
+ADD INDEX `idx_citizenid_paid` (`citizenid`, `paid`),
+ADD INDEX `idx_paid_date` (`paid`, `date`);
+
+CREATE TABLE IF NOT EXISTS `mdt_fines` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `char_id` int(11) NOT NULL,
+  `citizenid` varchar(50) NOT NULL,
+  `citizen_name` varchar(255) NOT NULL,
+  `officer_name` varchar(255) NOT NULL,
+  `offense` varchar(255) NOT NULL,
+  `amount` int(11) NOT NULL,
+  `notes` text DEFAULT NULL,
+  `date` varchar(50) NOT NULL,
+  `paid` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `char_id` (`char_id`),
+  KEY `citizenid` (`citizenid`),
+  KEY `paid` (`paid`),
+  KEY `date` (`date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT INTO `fine_types` (`id`, `label`, `amount`, `category`, `jailtime`) VALUES
 (1, 'Aiding and Abetting', 100, 0, 0),
 (2, 'Arson', 500, 0, 30),
