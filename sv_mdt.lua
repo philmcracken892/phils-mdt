@@ -14,7 +14,12 @@ local Config = {
         ['7'] = "This report cannot be found.",
         ['8'] = "Telegram saved.",
         ['9'] = "Telegram deleted.",
-        ['10'] = "Invalid mugshot URL provided."
+        ['10'] = "Invalid mugshot URL provided.",
+        ['11'] = "Fine has been issued successfully.",  
+        ['12'] = "Fine has been marked as paid.",       
+        ['13'] = "Fine has been deleted.",              
+        ['14'] = "Fine not found.",                     
+        ['15'] = "Player is not online to receive fine notification." 
     }
 }
 
@@ -44,6 +49,258 @@ local function IsValidImageURL(url)
     return false
 end
 
+RegisterServerEvent('phils-mdt:getMyFines')
+AddEventHandler('phils-mdt:getMyFines', function()
+    local src = source
+    local Player = RSGCore.Functions.GetPlayer(src)
+    
+    if not Player then return end
+    
+    exports.oxmysql:fetch('SELECT * FROM `mdt_fines` WHERE `citizenid` = ? AND `paid` = false ORDER BY `date` DESC', {
+        Player.PlayerData.citizenid
+    }, function(result)
+        TriggerClientEvent('phils-mdt:returnMyFines', src, result)
+    end)
+end)
+
+
+RegisterServerEvent('phils-mdt:getMyFinesStatus')
+AddEventHandler('phils-mdt:getMyFinesStatus', function()
+    local src = source
+    local Player = RSGCore.Functions.GetPlayer(src)
+    
+    if not Player then return end
+    
+    exports.oxmysql:fetch('SELECT COUNT(*) as count, SUM(amount) as total FROM `mdt_fines` WHERE `citizenid` = ? AND `paid` = false', {
+        Player.PlayerData.citizenid
+    }, function(result)
+        local count = result[1] and result[1].count or 0
+        local total = result[1] and result[1].total or 0
+        TriggerClientEvent('phils-mdt:fineStatus', src, count, total)
+    end)
+end)
+
+RegisterServerEvent('phils-mdt:payFine')
+AddEventHandler('phils-mdt:payFine', function(fineData, amount, paymentMethod, paymentType)
+    local src = source
+    local Player = RSGCore.Functions.GetPlayer(src)
+    
+    if not Player then return end
+    
+    
+    local playerMoney = 0
+    if paymentMethod == 'cash' then
+        playerMoney = Player.PlayerData.money.cash
+    elseif paymentMethod == 'bank' then
+        playerMoney = Player.PlayerData.money.bank
+    end
+    
+    if playerMoney < amount then
+        TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 
+            'Insufficient funds. You need $' .. amount .. ' but only have $' .. playerMoney .. ' in your ' .. paymentMethod .. '.')
+        return
+    end
+    
+    
+    if paymentType == 'single' then
+        
+        local fineId = fineData
+        
+        
+        exports.oxmysql:fetch('SELECT * FROM `mdt_fines` WHERE `id` = ? AND `citizenid` = ? AND `paid` = false', {
+            fineId, Player.PlayerData.citizenid
+        }, function(result)
+            if not result[1] then
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Fine not found or already paid.')
+                return
+            end
+            
+            local fine = result[1]
+            if fine.amount ~= amount then
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Fine amount mismatch.')
+                return
+            end
+            
+            
+            if Player.Functions.RemoveMoney(paymentMethod, amount, 'fine-payment') then
+                
+                exports.oxmysql:execute('UPDATE `mdt_fines` SET `paid` = true WHERE `id` = ?', {fineId})
+                
+               
+                exports.oxmysql:insert('INSERT INTO `mdt_fine_payments` (`fine_id`, `citizenid`, `amount`, `payment_method`, `payment_date`) VALUES (?, ?, ?, ?, ?)', {
+                    fineId, Player.PlayerData.citizenid, amount, paymentMethod, os.date('%Y-%m-%d %H:%M:%S')
+                })
+                
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, true, 
+                    'Fine #' .. fineId .. ' paid successfully ($' .. amount .. ' via ' .. paymentMethod .. ')')
+                
+                
+                broadcastMDTUpdate()
+                
+            else
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Payment processing failed.')
+            end
+        end)
+        
+    elseif paymentType == 'all' then
+        
+        local fineIds = fineData
+        
+        if type(fineIds) ~= 'table' then
+            TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Invalid fine data.')
+            return
+        end
+        
+        
+        local placeholders = {}
+        for i = 1, #fineIds do
+            table.insert(placeholders, '?')
+        end
+        local placeholderString = table.concat(placeholders, ',')
+        
+        local queryParams = {}
+        for _, id in ipairs(fineIds) do
+            table.insert(queryParams, id)
+        end
+        table.insert(queryParams, Player.PlayerData.citizenid)
+        
+        exports.oxmysql:fetch('SELECT * FROM `mdt_fines` WHERE `id` IN (' .. placeholderString .. ') AND `citizenid` = ? AND `paid` = false', 
+            queryParams, function(result)
+            
+            if #result ~= #fineIds then
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Some fines not found or already paid.')
+                return
+            end
+            
+           
+            local dbTotal = 0
+            for _, fine in ipairs(result) do
+                dbTotal = dbTotal + fine.amount
+            end
+            
+            if dbTotal ~= amount then
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Amount mismatch. Please try again.')
+                return
+            end
+            
+            
+            if Player.Functions.RemoveMoney(paymentMethod, amount, 'fines-payment') then
+                
+                exports.oxmysql:execute('UPDATE `mdt_fines` SET `paid` = true WHERE `id` IN (' .. placeholderString .. ') AND `citizenid` = ?', 
+                    queryParams)
+                
+                
+                for _, fineId in ipairs(fineIds) do
+                    exports.oxmysql:insert('INSERT INTO `mdt_fine_payments` (`fine_id`, `citizenid`, `amount`, `payment_method`, `payment_date`) VALUES (?, ?, ?, ?, ?)', {
+                        fineId, Player.PlayerData.citizenid, 0, paymentMethod, os.date('%Y-%m-%d %H:%M:%S')  -- Individual amounts in separate query if needed
+                    })
+                end
+                
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, true, 
+                    'All fines paid successfully! Total: $' .. amount .. ' via ' .. paymentMethod)
+                
+                
+                broadcastMDTUpdate()
+                
+            else
+                TriggerClientEvent('phils-mdt:finePaymentResult', src, false, 'Payment processing failed.')
+            end
+        end)
+    end
+end)
+RegisterCommand('debugfines', function(source, args)
+    local Player = RSGCore.Functions.GetPlayer(source)
+    if not Player then return end
+    
+    print("Player citizenid: " .. Player.PlayerData.citizenid)
+    
+    exports.oxmysql:fetch('SELECT * FROM `mdt_fines` WHERE `citizenid` = ?', {
+        Player.PlayerData.citizenid
+    }, function(result)
+        print("Total fines found: " .. #result)
+        for i, fine in ipairs(result) do
+            print("Fine " .. i .. ": ID=" .. fine.id .. ", Amount=" .. fine.amount .. ", Paid=" .. tostring(fine.paid) .. ", CitizenID=" .. (fine.citizenid or "NULL"))
+        end
+    end)
+end, false)
+-- Optional: Admin command to forgive fines
+RegisterCommand('forgivefines', function(source, args)
+    local src = source
+    local Player = RSGCore.Functions.GetPlayer(src)
+    
+    if not Player then return end
+    
+    
+    if not RSGCore.Functions.HasPermission(src, 'admin') and not RSGCore.Functions.HasPermission(src, 'god') then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Access Denied',
+            description = 'You do not have permission to use this command.',
+            type = 'error'
+        })
+        return
+    end
+    
+    if not args[1] then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Usage',
+            description = 'Usage: /forgivefines [citizenid or player ID]',
+            type = 'error'
+        })
+        return
+    end
+    
+    local targetPlayer = nil
+    local citizenId = nil
+    
+    
+    if tonumber(args[1]) then
+        targetPlayer = RSGCore.Functions.GetPlayer(tonumber(args[1]))
+        if targetPlayer then
+            citizenId = targetPlayer.PlayerData.citizenid
+        end
+    else-- Try as citizenid
+        citizenId = args[1]
+        targetPlayer = RSGCore.Functions.GetPlayerByCitizenId(citizenId)
+    end
+    
+    if not citizenId then
+        TriggerClientEvent('ox_lib:notify', src, {
+            title = 'Error',
+            description = 'Player not found.',
+            type = 'error'
+        })
+        return
+    end
+    
+    
+    exports.oxmysql:execute('UPDATE `mdt_fines` SET `paid` = 1 WHERE `citizenid` = ? AND `paid` = 0', {citizenId}, function(affectedRows)
+        if affectedRows > 0 then
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = 'Fines Forgiven',
+                description = 'Forgave ' .. affectedRows .. ' fine(s) for citizen: ' .. citizenId,
+                type = 'success'
+            })
+            
+            
+            if targetPlayer then
+                TriggerClientEvent('ox_lib:notify', targetPlayer.PlayerData.source, {
+                    title = 'Fines Forgiven',
+                    description = 'All your outstanding fines have been forgiven by an administrator.',
+                    type = 'success',
+                    duration = 7000
+                })
+            end
+            
+            broadcastMDTUpdate()
+        else
+            TriggerClientEvent('ox_lib:notify', src, {
+                title = 'No Fines',
+                description = 'No outstanding fines found for citizen: ' .. citizenId,
+                type = 'info'
+            })
+        end
+    end)
+end, false)
 
 RegisterServerEvent("phils-mdt:registerMDTUser")
 AddEventHandler("phils-mdt:registerMDTUser", function()
@@ -88,9 +345,11 @@ local function broadcastMDTUpdate()
                 end
                 
                
-                for src, _ in pairs(activeMDTUsers) do
-                    TriggerClientEvent('phils-mdt:updateMDTData', src, reports, warrants, notes)
-                end
+                exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_fines` ORDER BY `id` DESC LIMIT 10) sub ORDER BY `id` DESC", {}, function(fines)
+                    for src, _ in pairs(activeMDTUsers) do
+                        TriggerClientEvent('phils-mdt:updateMDTData', src, reports, warrants, notes, fines)
+                    end
+                end)
             end)
         end)
     end)
@@ -131,6 +390,7 @@ RegisterCommand(Config.Command, function(source, args)
             end
         end
         
+       
         exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_warrants` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(warrants)
             for w = 1, #warrants do
                 if warrants[w].charges then
@@ -138,6 +398,7 @@ RegisterCommand(Config.Command, function(source, args)
                 end
             end
             
+           
             exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_telegrams` ORDER BY `id` DESC LIMIT 6) sub ORDER BY `id` DESC", {}, function(notes)
                 for n = 1, #notes do
                     if notes[n].charges then
@@ -145,13 +406,99 @@ RegisterCommand(Config.Command, function(source, args)
                     end
                 end
                 
-                TriggerClientEvent('phils-mdt:toggleVisibilty', _source, reports, warrants, Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname, Player.PlayerData.job.type, Player.PlayerData.job.grade.level, notes)
+                
+                exports.oxmysql:fetch("SELECT * FROM (SELECT * FROM `mdt_fines` ORDER BY `id` DESC LIMIT 10) sub ORDER BY `id` DESC", {}, function(fines)
+                    TriggerClientEvent('phils-mdt:toggleVisibilty', _source, reports, warrants, Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname, Player.PlayerData.job.type, Player.PlayerData.job.grade.level, notes, fines)
+                end)
             end)
         end)
     end)
 end)
 
+RegisterServerEvent("phils-mdt:submitNewFine")
+AddEventHandler("phils-mdt:submitNewFine", function(data)
+    local usource = source
+    local Player = RSGCore.Functions.GetPlayer(usource)
+    
+    if not Player then return end
+    
+    local officername = Player.PlayerData.charinfo.firstname .. ' ' .. Player.PlayerData.charinfo.lastname
+    data.date = os.date('%m-%d-%Y %H:%M:%S', os.time())
+    
+    exports.oxmysql:insert('INSERT INTO `mdt_fines` (`char_id`, `citizenid`, `citizen_name`, `officer_name`, `offense`, `amount`, `notes`, `date`, `paid`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', {
+        data.char_id, 
+        data.citizenid,
+        data.citizen_name,
+        officername, 
+        data.offense,
+        data.amount,
+        data.notes,
+        data.date,
+        0  -- 0 = unpaid, 1 = paid
+    }, function(fineId)
+        
+        local targetPlayer = RSGCore.Functions.GetPlayerByCitizenId(data.citizenid)
+        if targetPlayer then
+            TriggerClientEvent('ox_lib:notify', targetPlayer.PlayerData.source, {
+                title = 'FINE ISSUED',
+                description = 'You have been fined $' .. data.amount .. ' for: ' .. data.offense .. '\nIssued by: ' .. officername,
+                type = 'error',
+                duration = 10000
+            })
+            
+            -- Optionally remove money from player (uncomment if you want automatic payment)
+            -- targetPlayer.Functions.RemoveMoney('cash', data.amount, 'mdt-fine')
+            -- if targetPlayer.PlayerData.money.cash < data.amount then
+            --     targetPlayer.Functions.RemoveMoney('bank', data.amount - targetPlayer.PlayerData.money.cash, 'mdt-fine')
+            -- end
+        else
+            TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['15'])
+        end
+        
+        TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['11'])
+        broadcastMDTUpdate()
+    end)
+end)
 
+RegisterServerEvent("phils-mdt:getRecentFines")
+AddEventHandler("phils-mdt:getRecentFines", function()
+    local usource = source
+    
+    exports.oxmysql:fetch("SELECT * FROM `mdt_fines` ORDER BY `id` DESC LIMIT 20", {}, function(fines)
+        TriggerClientEvent("phils-mdt:returnRecentFines", usource, fines)
+    end)
+end)
+
+
+RegisterServerEvent("phils-mdt:markFineAsPaid")
+AddEventHandler("phils-mdt:markFineAsPaid", function(fineId)
+    local usource = source
+    
+    exports.oxmysql:execute('UPDATE `mdt_fines` SET `paid` = 1 WHERE `id` = ?', {fineId}, function(rowsChanged)
+        if rowsChanged > 0 then
+            TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['12'])
+            TriggerClientEvent("phils-mdt:fineActionCompleted", usource)
+            broadcastMDTUpdate()
+        else
+            TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['14'])
+        end
+    end)
+end)
+
+
+RegisterServerEvent("phils-mdt:deleteFine")
+AddEventHandler("phils-mdt:deleteFine", function(fineId)
+    local usource = source
+    
+    exports.oxmysql:execute('DELETE FROM `mdt_fines` WHERE `id` = ?', {fineId}, function(rowsChanged)
+        if rowsChanged > 0 then
+            TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['13'])
+            broadcastMDTUpdate()
+        else
+            TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['14'])
+        end
+    end)
+end)
 RegisterServerEvent("phils-mdt:getOffensesAndOfficer")
 AddEventHandler("phils-mdt:getOffensesAndOfficer", function()
     local usource = source
