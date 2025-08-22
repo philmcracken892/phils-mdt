@@ -365,6 +365,8 @@ local function openMainMDT()
                 action = 'closeMugshot'
             })
             SetNuiFocus(false, false)
+			
+			ClearPedTasks(PlayerPedId())
         end
     })
     
@@ -1871,6 +1873,33 @@ function createWarrantWithPerson(person)
     mdtData.pendingWarrant = nil
     openMainMDT()
 end
+
+RegisterNetEvent('phils-mdt:openFromItem')
+AddEventHandler('phils-mdt:openFromItem', function()
+    
+    RSGCore.Functions.GetPlayerData(function(PlayerData)
+        local allowedJobs = {'vallaw', 'blklaw', 'strlaw', 'stdenlaw','rholaw',} 
+        local hasPermission = false
+        
+        for _, job in ipairs(allowedJobs) do
+            if PlayerData.job.name == job then
+                hasPermission = true
+                break
+            end
+        end
+        
+        if hasPermission then
+           Citizen.InvokeNative(0x524B54361229154F, PlayerPedId(), GetHashKey("world_human_write_notebook"), 9999999999,true,false, false, false)
+            TriggerServerEvent("phils-mdt:registerMDTUser")
+            openMainMDT()
+        else
+            RSGCore.Functions.Notify('You are not authorized to use this item', 'error')
+        end
+    end)
+end)
+
+
+
 
 RegisterNetEvent("phils-mdt:toggleVisibilty")
 AddEventHandler("phils-mdt:toggleVisibilty", function(reports, warrants, officer, job, grade, notes, fines)
