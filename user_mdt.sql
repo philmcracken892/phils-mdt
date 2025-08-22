@@ -8,6 +8,27 @@ CREATE TABLE `user_mdt` (
 	PRIMARY KEY (`id`)
 );
 
+CREATE TABLE IF NOT EXISTS `mdt_fines` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `char_id` int(11) NOT NULL,
+  `citizenid` varchar(50) NOT NULL,
+  `citizen_name` varchar(255) NOT NULL,
+  `officer_name` varchar(255) NOT NULL,
+  `offense` varchar(255) NOT NULL,
+  `amount` int(11) NOT NULL,
+  `notes` text DEFAULT NULL,
+  `date` varchar(50) NOT NULL,
+  `paid` tinyint(1) NOT NULL DEFAULT 0,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `char_id` (`char_id`),
+  KEY `citizenid` (`citizenid`),
+  KEY `paid` (`paid`),
+  KEY `date` (`date`),
+  KEY `idx_citizenid_paid` (`citizenid`,`paid`),
+  KEY `idx_paid_date` (`paid`,`date`)
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE `user_convictions` (
 	`id` int(11) NOT NULL AUTO_INCREMENT,
 	`char_id` int(11) DEFAULT NULL,
