@@ -22,25 +22,28 @@ local mdtData = {
 local currentContextId = nil
 
 
-local function IsValidImageURL(url)
+function IsValidImageURL(url)
     if not url or url == "" then
-        return true 
+        return false
     end
     
     if not string.match(url, "^https?://") then
         return false
     end
-   
+    
     local imageExtensions = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
     local isDiscordCDN = string.match(url, "cdn%.discordapp%.com") or string.match(url, "media%.discordapp%.net")
+    
     if isDiscordCDN then
         return true
     end
+    
     for _, ext in ipairs(imageExtensions) do
         if string.match(string.lower(url), ext) then
             return true
         end
     end
+    
     return false
 end
 
@@ -57,7 +60,7 @@ local function showMyFines(fines)
     if not fines or #fines == 0 then
         lib:notify({
             title = 'Fines',
-            description = 'You have no outstanding fines.',
+            description = 'You have no fines.',
             type = 'success'
         })
         return
@@ -85,7 +88,7 @@ local function showMyFines(fines)
     if #options == 0 then
         lib:notify({
             title = 'Fines',
-            description = 'You have no outstanding fines.',
+            description = 'You have no  fines.',
             type = 'success'
         })
         return
@@ -95,7 +98,7 @@ local function showMyFines(fines)
     if #options > 1 then
         table.insert(options, 1, {
             title = 'Pay All Fines ($' .. totalOwed .. ')',
-            description = 'Pay all outstanding fines at once',
+            description = 'Pay all  fines at once',
             icon = 'fa-solid fa-credit-card',
             iconColor = 'green',
             onSelect = function()
@@ -113,7 +116,7 @@ local function showMyFines(fines)
     
     lib:registerContext({
         id = 'my_fines',
-        title = 'Outstanding Fines ($' .. totalOwed .. ' total)',
+        title = ' Fines ($' .. totalOwed .. ' total)',
         options = options
     })
     
@@ -153,7 +156,7 @@ function payAllFines(fines, totalAmount)
     
     local confirm = lib:alertDialog({
         header = 'Pay All Fines',
-        content = 'Pay all outstanding fines?\n\nTotal Amount: $' .. totalAmount .. '\nNumber of fines: ' .. #unpaidFines,
+        content = 'Pay all fines?\n\nTotal Amount: $' .. totalAmount .. '\nNumber of fines: ' .. #unpaidFines,
         centered = true,
         cancel = true,
         labels = {
@@ -198,7 +201,7 @@ function selectPaymentMethod(fineData, amount, paymentType)
     
     lib:registerContext({
         id = 'payment_method',
-        title = 'Select Payment Method ($' .. amount .. ')',
+        title = 'Select  Method ($' .. amount .. ')',
         options = options
     })
     
@@ -244,7 +247,7 @@ AddEventHandler('phils-mdt:fineStatus', function(totalFines, totalAmount)
     if totalFines == 0 then
         lib:notify({
             title = 'Fine Status',
-            description = 'You have no outstanding fines.',
+            description = 'You have no fines.',
             type = 'success'
         })
     else
@@ -270,7 +273,7 @@ local function openMainMDT()
     local options = {
         {
             title = 'Search Person',
-            description = 'Search for a person in the database',
+            description = 'Search for a person',
             icon = 'fa-solid fa-file-lines',
             onSelect = function()
                 openPersonSearch()
@@ -278,15 +281,15 @@ local function openMainMDT()
         },
         {
             title = 'Search Reports',
-            description = 'Search through incident reports',
+            description = 'Search through reports',
             icon = 'fa-solid fa-file-lines',
             onSelect = function()
                 openReportSearch()
             end
         },
         {
-            title = 'Create New Report',
-            description = 'File a new incident report',
+            title = 'Create Report',
+            description = 'File a new  report',
             icon = 'fa-solid fa-file-lines',
             onSelect = function()
                 openNewReportForm()
@@ -301,8 +304,8 @@ local function openMainMDT()
             end
         },
         {
-            title = 'Create New Warrant',
-            description = 'Issue a new warrant',
+            title = 'Create A Warrant',
+            description = 'Issue a  warrant',
             icon = 'fa-solid fa-handcuffs',
             onSelect = function()
                 openNewWarrantForm()
@@ -311,7 +314,7 @@ local function openMainMDT()
         
         {
             title = 'Issue Fine',
-            description = 'Issue a fine to a citizen',
+            description = 'Issue a fine ',
             icon = 'fa-solid fa-dollar-sign',
             onSelect = function()
                 openNewFineForm()
@@ -319,7 +322,7 @@ local function openMainMDT()
         },
         {
             title = 'View Recent Fines',
-            description = 'View recently issued fines',
+            description = 'View recent fines',
             icon = 'fa-solid fa-money-bill',
             onSelect = function()
                 showRecentFines()
@@ -327,7 +330,7 @@ local function openMainMDT()
         },
         {
             title = 'Write Telegram',
-            description = 'Write a new telegram/note',
+            description = 'Write a new note',
             icon = 'fa-solid fa-note-sticky',
             onSelect = function()
                 openNewNoteForm()
@@ -353,7 +356,7 @@ local function openMainMDT()
     
     lib:registerContext({
         id = 'rsg_mdt_main',
-        title = 'Mobile Data Terminal',
+        title = 'Lawbook',
         options = options,
         onExit = function()
             TriggerServerEvent("phils-mdt:unregisterMDTUser")
@@ -665,7 +668,7 @@ function selectPersonForFine(results)
     
     lib:registerContext({
         id = 'select_person_fine',
-        title = 'Select Person for Fine',
+        title = 'Select Person to Fine',
         options = options
     })
     
@@ -811,7 +814,7 @@ local function showPersonDetails(offender)
         },
         {
             title = 'Edit Notes',
-            description = 'Add or edit notes for this person',
+            description = 'Add or edit notes ',
             icon = 'fa-solid fa-edit',
             onSelect = function()
                 editPersonNotes()
@@ -1234,7 +1237,6 @@ end
 
 
 function openNewReportForm()
-   
     local chargeOptions = {}
     for _, offense in ipairs(mdtData.offenses) do
         table.insert(chargeOptions, {
@@ -1270,16 +1272,31 @@ function openNewReportForm()
             label = 'Charges',
             description = 'Select applicable charges',
             options = chargeOptions
+        },
+        {
+            type = 'input',
+            label = 'Notice Image URL',
+            description = 'Optional image URL for public notice (e.g., mugshot)',
+            max = 255
         }
     })
     
     if input then
+        if input[5] and not IsValidImageURL(input[5]) then
+            lib:notify({
+                title = 'MDT',
+                description = 'Invalid image URL for notice. Use Discord CDN or .jpg/.png.',
+                type = 'error'
+            })
+            return
+        end
         TriggerServerEvent("phils-mdt:performOffenderSearch", input[1])
         mdtData.pendingReport = {
             name = input[1],
             title = input[2],
             incident = input[3],
-            charges = input[4] or {}
+            charges = input[4] or {},
+            notice_url = input[5] or '' -- Add notice URL
         }
     else
         openMainMDT()
@@ -1320,17 +1337,32 @@ function openNewWarrantForm()
             description = 'When should this warrant expire?',
             default = true,
             format = 'DD/MM/YYYY'
+        },
+        {
+            type = 'input',
+            label = 'Notice Image URL',
+            description = 'Optional image URL for public notice (e.g., mugshot)',
+            max = 255
         }
     })
     
     if input then
+        if input[6] and not IsValidImageURL(input[6]) then
+            lib:notify({
+                title = 'MDT',
+                description = 'Invalid image URL for notice. Use Discord CDN or .jpg/.png.',
+                type = 'error'
+            })
+            return
+        end
         TriggerServerEvent("phils-mdt:performOffenderSearch", input[1])
         mdtData.pendingWarrant = {
             name = input[1],
             report_id = input[2] or 0,
             report_title = input[3] or '',
             notes = input[4] or '',
-            expire = input[5] or ''
+            expire = input[5] or '',
+            notice_url = input[6] or '' -- Add notice URL
         }
     else
         openMainMDT()
@@ -1740,6 +1772,7 @@ function createReportWithPerson(person)
     local reportData = mdtData.pendingReport
     reportData.char_id = person.id
     reportData.name = person.firstname .. ' ' .. person.lastname
+    reportData.notice_url = reportData.notice_url or '' -- Ensure notice_url is included
     
     TriggerServerEvent("phils-mdt:submitNewReport", reportData)
     mdtData.pendingReport = nil
@@ -1771,7 +1804,7 @@ function selectPersonForWarrant(results)
     
     lib:registerContext({
         id = 'select_person_warrant',
-        title = 'Select Person for Warrant',
+        title = 'Select player',
         options = options
     })
     
@@ -1784,12 +1817,12 @@ function createWarrantWithPerson(person)
     warrantData.char_id = person.id
     warrantData.name = person.firstname .. ' ' .. person.lastname
     warrantData.charges = {}
+    warrantData.notice_url = warrantData.notice_url or '' -- Ensure notice_url is included
     
     TriggerServerEvent("phils-mdt:submitNewWarrant", warrantData)
     mdtData.pendingWarrant = nil
     openMainMDT()
 end
-
 
 RegisterNetEvent("phils-mdt:toggleVisibilty")
 AddEventHandler("phils-mdt:toggleVisibilty", function(reports, warrants, officer, job, grade, notes, fines)
@@ -1991,4 +2024,5 @@ RegisterNetEvent("phils-mdt:completedWarrantAction")
 AddEventHandler("phils-mdt:completedWarrantAction", function()
     TriggerServerEvent("phils-mdt:getWarrants")
 end)
+
 
