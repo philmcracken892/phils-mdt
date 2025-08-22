@@ -3,7 +3,7 @@ local RSGCore = exports['rsg-core']:GetCoreObject()
 
 local Config = {
     Command = "mdt",
-    Jobs = {"ranger", "marshal", "vallaw", "rholaw", "blklaw", "strlaw", "stdenlaw", "leo"},
+    Jobs = {"bountyhunter", "marshal", "vallaw", "rholaw", "blklaw", "strlaw", "stdenlaw", "leo"},
     Notify = {
         ['1'] = "Offender changes have been saved.",
         ['2'] = "Report changes have been saved.",
@@ -20,7 +20,8 @@ local Config = {
         ['13'] = "Fine has been deleted.",
         ['14'] = "Fine not found.",
         ['15'] = "Player is not online to receive fine notification.",
-        ['16'] = "Notice posted to public board."
+        ['16'] = "Notice posted to public board.",
+        ['17'] = "Selected convictions have been removed." -- Added for conviction removal
     },
     -- Noticeboard Config
     DatabaseName = "notices",
@@ -1041,6 +1042,38 @@ AddEventHandler("phils-mdt:getReportDetailsById", function(query, _source)
         else
             TriggerClientEvent("phils-mdt:closeModal", usource)
             TriggerClientEvent("phils-mdt:sendNotification", usource, Config.Notify['7'])
+        end
+    end)
+end)
+
+RegisterServerEvent("phils-mdt:removeConvictions")
+AddEventHandler("phils-mdt:removeConvictions", function(char_id, convictions)
+    local usource = source
+    
+    if not char_id or not convictions or type(convictions) ~= "table" or #convictions == 0 then
+        TriggerClientEvent("phils-mdt:sendNotification", usource, "Invalid data provided.")
+        return
+    end
+    
+    local placeholders = {}
+    for i = 1, #convictions do
+        table.insert(placeholders, "?")
+    end
+    local placeholderString = table.concat(placeholders, ",")
+    
+    local queryParams = {char_id}
+    for _, conviction in ipairs(convictions) do
+        table.insert(queryParams, conviction)
+    end
+    
+    exports.oxmysql:execute('DELETE FROM `user_convictions` WHERE `char_id` = ? AND `offense` IN (' .. placeholderString .. ')', queryParams, function(result)
+        local affectedRows = result.affectedRows or 0
+        if affectedRows > 0 then
+            TriggerClientEvent("phils-mdt:sendNotification", usource, "Selected convictions have been removed.")
+            TriggerClientEvent("phils-mdt:convictionsRemoved", usource)
+            broadcastMDTUpdate()
+        else
+            TriggerClientEvent("phils-mdt:sendNotification", usource, "No convictions found to remove.")
         end
     end)
 end)
